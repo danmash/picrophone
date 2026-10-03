@@ -5,7 +5,7 @@
 
 import { spawn, type ChildProcess, execFile } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
-import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { appendFileSync, chmodSync, closeSync, existsSync, mkdirSync, openSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,16 @@ const LOG_PATH = "/tmp/picrophone-ext.log";
 const DEBUG = process.env.PICOMEPHONE_DEBUG === "1";
 // Rotate instead of letting one session's log grow without bound.
 const LOG_MAX_BYTES = 1_000_000;
+// Recognized speech lands in this file verbatim, so it must not be readable by
+// other local users/processes. appendFileSync creates with 0o666 & ~umask, which
+// is world-readable (0644) under the common umask 022 — use mode 0o600 and
+// re-assert it on an existing file too, so an already-leaky log gets tightened.
+function ensurePrivate(path: string): void {
+	try {
+		if (existsSync(path)) chmodSync(path, 0o600);
+		else closeSync(openSync(path, "a", 0o600)); // openSync returns a raw fd
+	} catch {}
+}
 function log(msg: string): void {
 	if (!DEBUG) return;
 	try {
@@ -31,6 +41,7 @@ function log(msg: string): void {
 		}
 	} catch {}
 	try {
+		ensurePrivate(LOG_PATH);
 		appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${msg}\n`);
 	} catch {}
 }
